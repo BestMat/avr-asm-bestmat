@@ -21,12 +21,14 @@ import { writeFileSync } from "node:fs";
 const MASK = 0x0F;
 
 class Assembler {
-	#ptr = 0;
+	#ptr     = 0;
+	#labels  = new Map();
+	#patches = [];
 	constructor(MEMORY = 1024) {
 		// MEMORY: bytes
-		this.buffer = new ArrayBuffer(MEMORY);
-		this.view   = new DataView(this.buffer);
-		this.MEMORY = MEMORY;
+		this.buffer  = new ArrayBuffer(MEMORY);
+		this.view    = new DataView(this.buffer);
+		this.MEMORY  = MEMORY;
 	}
 	#write(byte) {
 		assert(this.#ptr + 2 <= this.buffer.byteLength, `Memory Overflow: cannot write 2 bytes (#ptr = ${this.#ptr})`);
@@ -50,7 +52,64 @@ class Assembler {
 		// const high  = (bytes >> 4) & MASK;
 		// const low   = bytes & MASK;
 	}
+	cbi(regX, regY) {
+		assert(Number.isInteger(regX) && 0 <= regX && regX <= 31, `regX (0 <= regX <= 31) must be between [0, 31] but got ${regX} instead`);
+		assert(Number.isInteger(regY) && 0 <= regY && regY <= 7, `regY (0 <= regY <= 7) must be between [0, 7] but got ${regY} instead`);
+		
+		const high = 0x98;
+		const low  = (regX << 3) | regY; // AAAA Abbb
+		const byte = (high << 8) | low;
+		this.#write(byte);
+		const str              = `${high.hex()} ${low.hex()}`;
+		const strLittleEndian  = `${low.hex()} ${high.hex()}`;
+
+		console.log({ byte, str, strLittleEndian  });
+		return { byte, str, strLittleEndian  };
+	}
+	label(name) {
+		assert(!this.#labels.has(name), `Label with name ${name} has already been declared`);
+		assert(typeof name === "string" && name.length >= 1, `Invalid label name ${name}. Label must be a string with length atleast 1`)
+		this.#labels.set(name, this.#ptr);
+	}
+	rjmp(addr) {
+		if (Number.isInteger(addr)) {
+			assert(-2048 <= addr && addr <= 2047, `rjmp instruction address out of range. It must be between [-2048, 2047] but received ${addr} instead`);
+			const high = 0xC000;
+			// low = addr
+			const byte = high | (addr & 0x0FFF);
+			this.#write(byte);
+
+			// const str             = `${high.hex()} ${addr.hex()}`;
+			// const strLittleEndian = `${addr.hex()} ${high.hex()}`;
+
+			// return { byte, str, strLittleEndian  };
+		} else if (typeof addr === "string") {
+			const opcode = 0xC000;
+			const ptr = this.#write(opcode);
+			this.#patches.push({
+				label: addr,
+				ptr
+			});
+		} else {
+			// TODO
+			assert(false);
+		}
+	}
+	#fixAllPatches() {
+		for (const { label, ptr } of this.#patches) {
+			const addr = this.#labels.get(label);
+			const cur  = ptr / 2;
+			const tar  = addr / 2;
+			const high = 0xC000;
+			const low = tar - cur - 1;
+			assert(-2048 <= low && low <= 2047, `rjmp instruction address out of range. It must be between [-2048, 2047] but received ${low} instead`);
+			const byte = high | (low & 0x0FFF);
+			this.view.setUint16(ptr, byte, true);
+		}
+		this.#patches = [];
+	}
 	compileIntel(fileName = "bestmat.hex", bytesPerLine = 16) {
+		this.#fixAllPatches();
 		const bytes = new Uint8Array(this.buffer, 0, this.#ptr);
 		const lines = [];
 		for (let addr = 0; addr < bytes.length; addr += bytesPerLine) {
@@ -120,9 +179,27 @@ Number.prototype.intelHex = function (len=2) {
 	return this.toString(16).padStart(len, "0").toUpperCase();
 };
 
-const DDRD = 0x0A;
+const DDRD  = 0x0A;
 const PORTD = 0x0B;
+const HIGH  = 0x01;
+const LOW   = 0x00;
 const asm = new Assembler();
+function pinMode(pin, mode) {
+	assert(mode === HIGH || mode === LOW, "Mode can either be HIGH (1) or LOW (0)");
+	if (mode === HIGH)
+		asm.sbi(DDRD, pin);
+	else
+		asm.cbi(DDRD, pin);
+}
+function digitalWrite(pin, value) {
+	assert(value === HIGH || value === LOW, "Digital value can either be HIGH (1) or LOW (0)");
+	if (mode === HIGH)
+		asm.sbi(PORTD, pin);
+	else
+		asm.cbi(PORTD, pin)
+}
 asm.sbi(DDRD, 3);
 asm.sbi(PORTD, 3);
+asm.label("loop");
+asm.rjmp("loop");
 asm.compileIntel("main.hex");

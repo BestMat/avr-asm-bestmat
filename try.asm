@@ -2,7 +2,7 @@
 .include "m328Pdef.inc"
 
 ;.org 0x0000
-;	sbi DDRD, 3 ; pinMode
+	;sbi DDRD, 3 ; pinMode
 	; 0x0a
 
 main:
@@ -11,8 +11,8 @@ main:
 	sbi PORTD, 3 ; digitalWrite
 	; 0x0b
 
-;loop:
-;	rjmp loop
+loop:
+	rjmp loop
 
 ; /dev/cu.usbmodem1101
 ;avra try.asm && avrdude -c arduino -p m328p -P /dev/cu.usbmodem1101 -b 115200 -U flash:w:try.hex:i
